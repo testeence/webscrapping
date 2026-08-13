@@ -1,0 +1,333 @@
+---
+title: "Introdução ao web scraping aplicado a índices de preços - Dia 1"
+author: "Lincoln Teixeira da Silva e Plinio Marcos Leal dos Santos"
+date: "21/02/2022"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+---
+
+## 1 - Estudo de caso
+
+Extrair informações da página do [zoom](https://www.zoom.com.br/). O zoom é um site agregador de preços de vários varejistas. 
+
+Carregar pacotes:
+
+- rvest: Extrair dados da web
+- tidyverse: Coleção de pacotes para ciência de dados
+- lubridate: Datas e horas
+
+
+```{r echo = FALSE}
+#knitr::opts_chunk$set(eval = FALSE)
+```
+
+```{r packages}
+library(rvest) # Carrega a biblioteca rvest
+library(tidyverse) # Carrega a biblioteca tidyverse
+library(lubridate) # Carrega a biblioteca lubridate
+```
+
+
+### 1.1 - Leitura do código HTML da página
+
+O comando **read_html** lê o código HTML presente na página. 
+
+```{r read_html}
+link_pagina <- "https://www.zoom.com.br/celular/smartphone" # link 
+pagina_celulares <- read_html(link_pagina) # Le o código HTML do link
+pagina_celulares # Exibe resultados
+```
+
+
+### 1.2 - Extração, limpeza e estruturação dos dados
+
+A partir da leitura do código HTML da página podemos encontrar os dados que queremos extrair. Esses dados podem ser encontrados nos *nós*. 
+
+
+#### 1.2.1 - Extração de preços dos produtos 
+
+Como localizar o nó que contém, por exemplo, o preço dos produtos?
+
+- Utilizar o selector gadget do Google Chrome. 
+  1. Clicar no botão do selector gadget
+  2. Clicar na informação de página que queremos extrair (preço, descrição, etc)
+  3. O nome do nó irá aparecer na caixa inferior e os dados ficarão destacados
+
+
+
+![Figura 1: Selector Gadget](Imagens/Selector_Gadget_2.png)   
+
+
+
+Depois de identificado o nó, utilizamos a função *html_nodes* para extrair todas as informações contidas nesses nós. Depois transformamos em texto.
+
+```{r price}
+menor_preco <- pagina_celulares %>% # Com o objeto pagina_celulares
+  html_nodes(".CellPrice_MainValue__3s0iP") %>% # Extrai o nó .CellPrice_MainValue__3s0iP
+  html_text() # Extrai texto
+
+menor_preco # Exibe resultados
+```
+#### 1.2.2 - Limpeza de preços dos produtos 
+
+Todos os preços disponíveis na página foram extraídos. Porém, contém informação do tipo de moeda corrente, separador de milhares (pontos)  e separador de casas decimais (vírgula). O R e outras linguagens de programação entendem pontos como separador de casas decimais. Devemos fazer algumas alterações para extrair os números de forma que o R entenda.
+
+- 1. Excluir o símbolo de moedas 'R$'. 
+- 2. Excluir ponto '.'.
+- 3. Substituir vírgula ',' por ponto '.'
+- 4. Transformar o resultado que está em caracter para numérico.
+
+
+```{r}
+menor_preco <- menor_preco %>% # Com o objeto menor_preco
+  str_remove_all('R\\$ ') %>% # remove R$
+  str_remove_all('\\.') %>% # remove .
+  str_replace_all('\\,', '\\.') %>% # Substituir , por .
+  as.numeric() # Transforma em numérico
+
+menor_preco # Exibe resultados
+```
+
+#### 1.2.3 - Extração de descrição dos produtos 
+
+De forma similar ao que foi feito anteriormente, localizar as descrições dos celulares.
+
+- Utilizar o selector gadget do Google Chrome.
+  - 1. Clicar no botão do selector gadget
+  - 2. Clicar na informação de página que queremos extrair (preço, descrição, etc)
+  - 3. O nome do nó irá aparecer na caixa inferior e os dados ficarão destacados.
+ 
+Quando clicamos em alguma das descrições outros dados além das informações de interesse ficam amarelos, conforme campos destacados com contornos vermelhos na Figura 2.
+
+
+
+![Figura 2: Descrições dos produtos](Imagens/Descricao.png)
+
+
+
+Como estamos interessados somente na descrição do produto, podemos contornar esse problema selecionando primeiro o nó das caixas dos produtos e em seguida filtrando o nó das descrições dentro dessas caixas. Dessa forma, deixamos de selecionar os dados destacados em vermelho na Figura 2. 
+
+
+
+![Figura 3: Caixa do produto](Imagens/Grupo_Produtos.png)
+
+
+
+```{r description}
+descricao <- pagina_celulares %>% # Com o objeto pagina_celulares
+  html_nodes(".Cell_Content__1630r .Text_LabelSmRegular__2Lr6I") %>% # Nó da descrição. .css + .css
+  html_text() # Extrai texto
+
+descricao # Exibe resultados
+```
+#### 1.2.4 - Limpeza de descrição dos produtos 
+
+Continua não extraindo somente as descrições, mas diminuímos a quantidade de dados que não eram do interesse. Devemos excluir os elementos com "Menor preço" e "Por".
+
+```{r description2}
+descricao <- descricao %>% # Extrai o texto
+  str_subset("^Menor preço$", negate = TRUE) %>% # Desconsidera os elementos com "Menor preço"
+  str_subset("^Por$", negate = "TRUE") # Desconsidera os elementos com "Por"
+
+descricao # Exibe resultados
+```
+
+Ou ainda:
+
+
+![Figura 4: Outro nó para descrição](Imagens/Descricao_2.png)
+
+
+
+```{r description3}
+descricao <- pagina_celulares %>% # Com o objeto pagina_celulares
+  html_nodes(".Cell_Name__jnsS-") %>% # Nó do grupo de produtos
+  html_text() # Extrai texto
+
+descricao # Exibe resultados
+```
+
+#### 1.2.5 - Extração de parcelas do pagamento dos produtos 
+
+Diferente da descrição e do preço, o valor da parcela pode não estar sendo informado para algum dos produtos como pode ser verificado na Figura 5. É importante ter uma função que coloque missing ou *NA* nos casos ausentes, pois o número de elementos nesse caso deve ser o mesmo para todas as extrações de dados.
+
+
+
+![Figura 5: Missing em parcelamento](Imagens/Info_Missing.png)
+
+
+
+Similar ao que foi feito para extrair a descrição dos produtos, podemos navegar primeiro para o grupo dos produtos e dentro do grupo dos produtos procurar pelo nó das parcelas. Se um dos textos dos elementos do nó estiver vazio ele recebe *NA*.
+
+```{r no_com_missing}
+no_com_missing <- function(pagina, css, group) {
+  txt <- read_html(pagina) %>% # Le a pagina
+    html_nodes(group) %>%  # Seleciona o nó do group
+    lapply(. %>%  # Com o objeto anterior
+             html_nodes(css) %>% # Seleciona o nó css 
+             html_text() %>% # Transforma em texto - (elementos da lista)
+             ifelse(identical(., character(0)), NA, .) # Se vazio transforma em NA
+           ) %>% 
+    unlist # Transforma a lista em vetor
+  return(txt) # A função retorna o objeto txt
+}
+```
+
+Utilizando a função *no_com_missing* para extrair a informação das parcelas.
+
+```{r parcela}
+parcela <- no_com_missing(link_pagina, 
+                          ".CellPrice_Installments__1W3oO", 
+                          ".Cell_Content__1630r") 
+parcela # Exibe resultados
+```
+
+#### 1.2.6 - Limpeza de parcelas do pagamento dos produtos 
+
+Ideal é separar esses dados em dois outros objetos:
+
+1. Número de parcelas
+2. Valor das parcelas
+
+```{r n_parcela}
+n_parcela <- parcela %>% # Com o objeto parcela
+  str_extract('[0-9]+x') %>% # Extrai a parte de texto com 'dígitos + x'
+  str_remove_all('x') %>% # Remove a string 'x'
+  as.numeric # Transforma em numérico
+
+n_parcela # Exibe resultados
+```
+
+```{r valor_parcela}
+valor_parcela <- parcela %>% # Com o objeto parcela
+  str_remove_all('\\.') %>% # Remove todos os '.' pontos
+  str_replace_all('\\,', '\\.') %>% # Substitui ',' vírgula por '.' pontos
+  str_extract('R\\$ [0-9]+.[0-9]+') %>% # Extrai a parte 'R$ + número'
+  str_remove_all('R\\$ ') %>% # Remove a moeda R$
+  as.numeric() # Transforma em numérico
+
+valor_parcela # Exibe resultados
+```
+
+#### 1.2.7 - Estruturação dos dados em um data frame
+
+Criar um data frame com os dados extraídos.
+
+```{r}
+dado <- data.frame("descricao" = descricao, 
+                   "preco" = menor_preco, 
+                   "parcela_quantidade" = n_parcela,
+                   "parcela_valor" = valor_parcela,
+                   "dia" = today(),
+                   "hora" = format(now(), "%H:%M:%S"))
+DT::datatable(dado)
+```
+
+### 1.3 - Extração de links
+
+É possível extrair links das páginas. Basta encontrar o nó e usar o comando *html_attr* e extrair href para pegar o link.
+
+```{r next_page}
+proxima_pagina <- pagina_celulares %>% # Com o objeto pagina_celulares
+  html_nodes(".Paginator_pageLink__v3t86") %>% # Nó de páginas
+  html_attr("href") %>% # Encontra links
+  tail(1) # Seleciona o último
+```
+
+### 1.4 - Criar uma função para outros produtos do site.
+
+Função para ler uma categoria da página.
+
+```{r script}
+scrape <- function(link){
+  dado <- data.frame()
+  
+  pagina = 'https://www.zoom.com.br'
+  
+  read_page <- TRUE
+  while(read_page){
+    le_pagina <- read_html(link)
+    
+    # preço
+    menor_preco <- le_pagina %>%
+      html_nodes(".CellPrice_MainValue__3s0iP") %>%
+      html_text() %>%
+      str_remove_all('R\\$ ') %>%
+      str_remove_all('\\.') %>%
+      str_replace_all('\\,', '\\.') %>%
+      as.numeric
+    
+    # descrição
+    descricao <- le_pagina %>% # Com o objeto pagina_celulares
+      html_nodes(".Cell_Name__jnsS-") %>% # Nó do grupo de produtos
+      html_text() 
+    
+    parcela <- no_com_missing(link, 
+                              ".CellPrice_Installments__1W3oO", 
+                              ".Cell_Content__1630r")
+
+    # número de parcelas
+    n_parcela <- parcela %>%
+      str_extract('[0-9]+x') %>%
+      str_remove_all('x') %>%
+      as.numeric()
+    
+    # Valor das parcelas
+    valor_parcela <- parcela %>%
+      str_remove_all('\\.') %>%
+      str_replace('\\,', '\\.') %>%
+      str_extract('R\\$ [0-9]+.[0-9]+') %>%
+      str_remove_all('R\\$ ') %>%
+      as.numeric()
+    
+    # Monta data frame
+    df_aux <- data.frame("descricao" = descricao, 
+                         "preco" = menor_preco,
+                         "parcelas" = n_parcela, 
+                         "valor_parcela" = valor_parcela,
+                         "dia" = today(),
+                         "hora" = format(now(), "%H:%M:%S")
+                         )
+    
+    # Procura produtos patrocinados
+    patrocinado <- no_com_missing(link, 
+                                  ".Badge_sponsored__3F6An", 
+                                  ".Cell_Content__1630r") %>%
+      str_which("Patrocinado") 
+    
+    # Remove observações patrocinadas
+    df_aux <- df_aux[-patrocinado, ]
+    
+    
+    # Agrupa coletas ao data frame já existente
+    dado <- rbind(dado, df_aux)
+    
+    # Link da próxima página
+    link_proxima_pagina <- le_pagina %>%
+      html_nodes(".Paginator_pageLink__v3t86") %>%
+      html_attr("href") %>%
+      tail(1)
+    
+    read_page <- !is.na(link_proxima_pagina)
+        
+    # print(link_proxima_pagina %>%
+    #   str_extract('page=[0-9]+') %>%
+    #   str_remove('page='))
+    
+    link <- paste0(pagina, link_proxima_pagina)
+  }
+  return(dado)
+}
+```
+
+```{r cooktops}
+cooktops <- scrape(link = "https://www.zoom.com.br/fogao/cooktop")
+DT::datatable(cooktops)
+```
+
+
+
+
+

@@ -1,0 +1,497 @@
+---
+title: "Introdução ao web scraping aplicado a índices de preços - Dia 2"
+author: "Lincoln Teixeira da Silva e Plinio Marcos Leal dos Santos"
+date: "23/02/2022"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 4
+---
+
+## 1 - Configurar Selenium no R.
+
+Para utilizar o pacote RSelenium que promove uma interação entre o R e o navegador devemos ter instalado alguns arquivos e declarar para o R onde eles estão.
+
+## 1.1 - Download Selenium e Chromedriver
+
+- [Selenium Server Standalone Binary](http://selenium-release.storage.googleapis.com/index.html?path=4.0/)
+- [ChromeDriver](https://chromedriver.chromium.org/downloads) - conforme versões do navegador e sistema operacional.
+
+## 1.2 - Declarar Selenium e Chromedriver
+
+Precisamos declarar para o R onde estão os arquivos que foram baixados para o funcionamento do pacote RSelenium que promoverá a interação entre o R e o browser. 
+
+```{r configura, eval = FALSE}
+setwd("...") # Inserir caminho
+system("java -jar selenium-server-standalone-4.0.0-alpha-1.jar", wait = FALSE) # Declara selenium
+system("chromedriver.exe", wait = FALSE) # Declara chromedriver
+```
+
+```{r configura2, echo = FALSE}
+setwd("C:/Users/linco/Documents/COINP/Selenium/") # Declara pasta onde estão os arquivos
+system("java -jar selenium-server-standalone-4.0.0-alpha-1.jar", wait = FALSE) # Declara selenium
+system("chromedriver.exe", wait = FALSE) # Declara chromedriver
+```
+
+
+
+## 2 - Estudo de caso - Latam Airlines
+
+Utilizaremos o site da Latam Airlines com sítio no Chile. A Latam é uma das maiores empresas de aviação da América Latina. O sítio da Latam no Chile foi escolhido aleatoriamente dentre os possíveis de língua espanhola.
+
+Armazenar o link no objeto *link*.
+
+```{r pagina}
+link = "https://www.latamairlines.com/cl/es"
+```
+
+Carregar pacotes que serão utilizados na extração, limpeza e organização dos dados.
+
+```{r pacotes}
+library(RSelenium)
+library(tidyverse)
+library(lubridate)
+```
+
+### 2.1 - Abrir o navegador e ir para a página desejada
+
+Após carregar os pacotes e informar para o R onde estão os arquivos do Selenium Server e do Chromedriver podemos utililizar as funções do pacote RSelenium para interagir com a página.
+
+```{r abre_browser}
+remDr <- remoteDriver(remoteServerAddr = "localhost", 
+                      browserName = "chrome") # Inicia o driver
+remDr$open() # Abre navegador/browser
+remDr$navigate(link) # Navega pelo link
+remDr$maxWindowSize() # Maximiza a janela do navegador
+```
+
+
+### 2.2 - Clicar em aceitar cookies ou continuar em Latam Chile.
+
+A página principal ao abrir pode surgir com duas mensagens conforme ilustrado na figura 1. 
+
+- 1. Para residentes no Chile uma mensagem para aceitar cookies.
+- 2. Para não residentes do Chile há uma pergunta se deseja continuar na página da LATAM Chile.
+
+
+![Figura 1: Diferença entre residentes no Chile e não residentes](Imagens/Dif_BR_CH.png)
+
+
+
+Devemos clicar em aceitar cookies ou continuar em Latam Chile. A identificação de nós acontece conforme visto no dia 1. Podemos usar o Selector gadget para encontrar esses nós. 
+
+
+
+![Figura 2: Diferença entre residentes no Chile e não residentes](Imagens/Cookies_Continuar.png)
+
+
+
+
+Porém os comandos para extrair os nós são um pouco diferentes.
+
+```{r procura_elemento}
+web_elements <- remDr$findElements(using = 'css', 
+                                   value = ".MuiButton-label") # Procura elementos
+lapply(web_elements, function(x){x$getElementText()}) %>%  # Extrai texto dos elementos
+      unlist 
+```
+
+O objetivo é **clicar** no elemento com o nome *Continuar en LATAM Chile*. Portanto, devemos clicar no último elemento da lista utilizando a função **clickElement**.
+
+```{r clica_elemento}
+web_elements[[length(web_elements)]]$clickElement() # Clica no último elemento encontrado
+```
+
+### 2.3 - Selecionar quantidade de passageiros
+
+Podemos, por exemplo, querer selecionar vôos com mais de 1 adulto ou incluir crianças e/ou bebês. Novamente, devemos interagir com a página e clicar em botões que façam esse tipo de alteração. O elemento para abrir a opção para incluir passageiros é mostrado na Figura 3. O objetivo é *clicar* no elemento, portanto após encontrar o nó devemos utilizar a função **clickElement**
+
+
+![Figura 3: Clica para incluir passageiro](Imagens/Passageiro.png)
+
+
+
+
+```{r abre_passageiros}
+web_element <- remDr$findElement(using = 'css', 
+                                 value = "#btnAddPassengerCTA") # Procura botão passageiros
+web_element$clickElement() # Clica no botão de passageiros
+Sys.sleep(0.5) # Aguarda 0.5 segundos
+```
+
+Para adicionar adulto o elemento é diferente conforme ilustrado na Figura 4. Além disso, nem sempre será possível utilizar o Selector gadget para selecionar um elemento. A opção *Inspecionar* pode ser a solução para encontrar o nó. Após encontrar o nó clicamos no elemento para incluir um passageiro adulto.
+
+
+![Figura 4: Clica para incluir passageiro](Imagens/AddAdult.png)
+
+
+
+
+```{r add_adulto}
+web_element <- remDr$findElement(using = 'id', 
+                                 value = "btnPlusAdults") # Procura botão que adiciona passageiro adulto
+web_element$clickElement() # Clica no elemento
+```
+
+Fecha opção de passageiros conforme visto anteriormente.
+
+```{r fecha_passageiros}
+web_element <- remDr$findElement(using = 'id', 
+                                 value = "btnAddPassengerCTA") # Procura botão passageiros
+web_element$clickElement() # Clica no elemento
+```
+
+### 2.4 - Inserir a cidade/aeroporto de origem
+
+Para inserir o aeroporto de origem devemos:
+
+  1. Encontrar o nó da caixa para inserir a origem e clicar no elemento.
+  2. Inserir o texto com a origem na caixa
+  3. Encontrar o nó da opção que vai aparecer após escrever o texto da origem. Clicar no elemento.
+  
+
+
+![Figura 5: Inserir Origem](Imagens/Campo_Origem.png)
+
+
+
+
+```{r Origem}
+webElem <- remDr$findElement(using = 'css', 
+                             value = "#txtInputOrigin_field") # Procura botão para incluir origem
+webElem$clickElement() # Clica no elemento
+cidade_origem = "Santiago de Chile, SCL - Chile" # Cidade de origem
+webElem$sendKeysToElement(list(cidade_origem)) # Insere cidade de origem no campo ativo.
+webElem <- remDr$findElement(using = 'css', 
+                             value = "#btnItemAutoComplete_0") # Procura opções após inserir texto da origem
+webElem$clickElement() # Clica no elemento
+```
+
+### 2.5 - Inserir a cidade/aeroporto de destino
+
+Depois de inserir a origem o cursor vai para o botão de destino. Contudo, não é possível inserir o texto do aeroporto de origem. Devemos clicar em algum lugar da página fora da caixa de *Vuelos* e depois inserir o destino de forma similar ao que foi feito para inserir a origem.
+
+```{r clica_fora}
+webElem <- remDr$findElement(using = 'css', 
+                             value = ".sc-kaCJFH") # Procura elemento sair da caixa de rota
+webElem$clickElement() # Clica no elemento
+Sys.sleep(0.5) # Aguarda 0.5 segundos
+```
+
+Similar ao que foi feito para a origem, para inserir o aeroporto de destino devemos:
+
+  1. Encontrar o nó da caixa para inserir o destino e clicar no elemento.
+  2. Inserir o texto com a origem na caixa
+  3. Encontrar o nó da opção que vai aparecer após escrever o texto do destino Clicar no elemento.
+  
+
+
+![Figura 6: Inserir Destino](Imagens/Campo_Destino.png)
+
+
+
+
+```{r destino}
+webElem <- remDr$findElement(using = 'css', 
+                             value = "#txtInputDestination_field") # Procura botão para incluir destino
+webElem$clickElement() # Clica no elemento
+cidade_destino = "Rio de Janeiro, RIO - Brasil" # Cidade de destino
+webElem$sendKeysToElement(list(cidade_destino)) # Insere cidade de origem no campo ativo.
+webElem <- remDr$findElement(using = 'id', 
+                             value = "btnItemAutoComplete_0") # Procura opções após inserir texto do destino
+webElem$clickElement() # Clica no elemento
+```
+
+### 2.6 - Inserir datas de ida e volta.
+
+Para inserir as datas de ida e volta devemos interagir com o site clicando nos elementos desejados.
+
+  1. Clicar no nó da caixa para inserir a data de ida e clicar no elemento. 
+  2. Clicar na data de ida
+  3. Clicar na data de volta
+  
+
+O nó do campo de ida está ilustrado na Figura 7. Após encontrar o nó, clicamos no elemento para abrir as opções de datas disponíveis.  
+  
+
+![Figura 7: Inserir Datas](Imagens/Campo_Data.png)
+
+
+ 
+
+Para escolher a data de ida e volta o processo é um pouco diferente do que vimos até agora. Em geral, escolhemos elementos utlizando nós de *classe* e *id*, mas para encontrar o elemento das datas teremos que escolher um nó *aria-label* e informar que o texto contido ali dentro seja um texto pré-definido. A Figura 8 mostra o nó da data 5 de Março de 2022. Devemos fazer com que o texto do nó *aria-label* seja o texto 'Elija sábado, 5 de marzo de 2022 como su fecha de ida. Está disponible.' Após encontrar o nó devemos clicar no elemento para escolher a data de ida.
+
+
+![Figura 8: Escolher data de ida e volta](Imagens/Data_Ida.png)
+
+
+
+
+O procedimento para volta é análogo e o texto é praticamento o mesmo.
+
+```{r data}
+webElem <- remDr$findElement(using = 'css', value = "#departureDate") # Procura botão para incluir data
+webElem$clickElement() # Clica no elemento
+Sys.sleep(1) # Aguarda 1 segundo
+departureDate = "Elija sábado, 5 de marzo de 2022 como su fecha de ida. Está disponible." # Data ida 5 de março de 2022
+webElem <- remDr$findElement(using = 'css', 
+                             value = paste0("[aria-label='", departureDate, "']")) # Procura data onde o texto equivale ao objeto departureDate
+webElem$clickElement() # Clica no elemento
+returnDate = "Elija sábado, 12 de marzo de 2022 como fecha de vuelta. Está disponible." # Data volta 12 de março de 2022
+webElem <- remDr$findElement(using = 'css', 
+                             value = paste0("[aria-label='", returnDate, "']")) # Procura data onde o texto equivale ao objeto returnDate
+webElem$clickElement() # Clica no elemento
+```
+
+
+### 2.7 - Clicar em buscar
+
+Após inserir as configurações do vôo de preferência, devemos clicar no botão buscar para encontrar as opções de vôos e extrair os dados de interesse. Nota-se que até o momento utilizamos o Selenium para interagir com o site somente clicando em elementos e inserindo textos.
+
+```{r buscar}
+webElem <- remDr$findElement(using = 'id', 
+                             value = "btnSearchCTA") # Procura elemento do botão buscar
+webElem$clickElement() # Clica no elemento
+Sys.sleep(5) # Esperar um tempo para a página carregar
+```
+
+<!-- Espera carregar página -->
+
+<!-- ```{r aguarda_precos, echo = FALSE, eval = FALSE, include = FALSE} -->
+<!-- load = NULL -->
+<!-- while(is.null(load)){ -->
+<!--   load <- try(remDr$findElements(using = 'css', value = ".displayAmount"),  -->
+<!--                                  silent = TRUE) # Enquanto não aparecer elementos preços tentar novamente após 1s -->
+<!--   if(is.null(load)){ -->
+<!--     Sys.sleep(1) -->
+<!--     print('waiting...') -->
+<!--   } -->
+<!-- } -->
+<!-- ``` -->
+
+
+### 2.8 - Extração dos dados dos vôos.
+
+Até então, estávamos utilizando o Selenium para interagir com a página, clicar em elementos e inserir textos. Agora iremos extrair dados da página. O processo para encontrar os nós é o mesmo visto com o pacote *rvest*, porém as funções para extração do texto dos elementos tem nomes e saídas um pouco diferentes. Na verdade, um exemplo similar já foi mostrado na hora de selecionar o elemento correto para aceitar cookies ou permanecer no sítio da Latam Chile. 
+
+O processo para extrair os dados dos vôos de ida e volta são iguais. Nesse caso é interessante criar uma **função** com esse processo para não tornar o código repetitivo. 
+
+Após clicar no botão buscar para encontrar os vôos, o site exibe todos os vôos possíveis de ida. Hora de ida e chegada, aeroporto de ida e chegada, duração do vôo, número de paradas. Essas informações podem ser extraídas encontrando os nós de cada um deles e extraindo seu texto assim que a página é carregada.
+
+Contudo, a página não exibe (ainda) as opções dos preços por tarifas. Para descobrir essas informações devemos clicar em cada um dos vôos para extrair essa informação.
+
+Em resumo, a função a seguir extrairá:
+
+- 1. Total de vôos
+- 2. Aeroportos de ida e chegada
+- 3. Horas de ida e chegada
+- 4. Duração do Vôo
+- 5. Número de paradas
+- 6. Clica em cada um dos vôos disponíveis e extrai:
+  - 1. Tarifa
+  - 2. Preço
+- 7. Armazena em um dataframe
+
+```{r funcao_pega_dado_dos_voos}
+dados_voo <- function(){
+  # Total de voos
+  web_elements <- remDr$findElements(using = 'css', 
+                                     value = ".displayAmount") # Procura elemento de preços
+  n_voos = lapply(web_elements, function(x){x$getElementText()}) %>%  
+      unlist %>% # Extrai texto dos elementos encontrados
+    str_subset("CLP") %>%
+    length # Comprimento do vetor
+
+  
+  # Informação do voo
+  web_elements = remDr$findElements(using = 'css', 
+                                    value = ".flight-information") # Procura elemento com informação dos vôos
+  flight_info = lapply(web_elements, function(x){x$getElementText()}) %>%
+    unlist %>% # Extrai texto dos elementos encontrados
+    str_remove_all("\n") # Exclui quebra de linhas
+  
+  # Sigla Aeroporto de saída
+  aer_ida <- flight_info %>% # Com o objeto flight_info
+    str_extract('[A-Z]+') %>% # Extrai somente as letras maiúsculas
+    .[seq(1, length(.), by = 2)] # Extrai os elementos ímpares do vetor
+  
+  # Sigla Aeroporto de chegada
+  aer_chegada <- flight_info %>% # Com o objeto flight_info
+    str_extract('[A-Z]+') %>% # Extrai somente as letras maiúsculas
+    .[seq(2, length(.), by = 2)] # Extrai os elementos pares do vetor
+  
+  # Hora de saída
+  hora_ida = flight_info %>% # Com o objeto flight_info
+    str_extract('[^A-Z]+') %>% # Extrai tudo que não seja letras maiúsculas
+    .[seq(1, length(.), by = 2)] # Extrai os elementos ímpares do vetor
+  
+  # Hora de chegada
+  hora_chegada = flight_info %>% # Com o objeto flight_info
+    str_extract('[^A-Z]+') %>% # Extrai tudo que não seja letras maiúsculas
+    .[seq(2, length(.), by = 2)] # Extrai os elementos pares do vetor
+  
+  # Duracao do voo
+  web_elements = remDr$findElements(using = 'css', 
+                                    value = ".flight-duration .hhrBNA") # Procura elemento com informação dos vôos
+  duracao = lapply(web_elements, function(x){x$getElementText()}) %>%
+    unlist # Extrai texto dos elementos encontrados
+  
+  duracao_hora <- str_extract(duracao, '[0-9]+ h') %>% # Extrai somente a parte com número seguido de ' h'
+                      str_remove_all(' h') %>% # Exclui ' h'
+    str_pad(width = 2, pad = "0", side = "left") # Inclui 0 à esquerda caso o número tenha somente um algarismo
+  
+  duracao_min <- ifelse(str_detect(duracao , 'min$',  negate = TRUE), paste0(duracao, ' 0 min'), duracao) %>% # Se não existe 'min' no texto, inclui ' 0 min'
+    str_extract('[0-9]+ min') %>% # Extrai somente a parte com número seguido de ' min'
+    str_remove_all(' min') %>% # Exclui ' min'
+    str_pad(width = 2, pad = "0", side = "left") # Inclui 0 à esquerda caso o número tenha somente um algarismo
+  
+  duracao_formatado <- paste(duracao_hora, duracao_min, sep = ":") # Junta hora e minuto separando por ":"
+  
+  
+  # Número de paradas
+  web_elements = remDr$findElements(using = 'css', 
+                                    value = ".lgvePP") # Procura elemento com informação dos vôos
+  n_paradas = lapply(web_elements, function(x){x$getElementText()}) %>%
+    unlist %>% # Extrai texto dos elementos encontrados
+    str_extract('[0-9]+') %>%  # Extrai somente números
+    as.numeric() %>% # Transforma em numérico
+    ifelse(is.na(.), 0, .) # Se há NA, transforma em 0 senão mantém o valor antigo.
+  
+  precos <- list() # Cria objeto do tipo lista - precos
+  tarifa <- list() # Cria objeto do tipo lista - tarifa
+  for(i in 1:n_voos){ # Loop de 1 até total de voos
+    price_node <- paste0("#WrapperCardFlight", i-1) # Descobre nome do nó que abre determinado tipo de voo
+    web_elements <- remDr$findElement(using = 'css', 
+                                      value = price_node) # Procura card do voo
+    web_elements$clickElement() # Clica no elemento
+    web_elements = remDr$findElements(using = 'css', 
+                               value = paste0(price_node, " .displayAmount")) # Após clicar num vôo, extrai os preços somente dentro do vôo
+    precos <- c(precos, # Concatena a lista de precos + nova lista
+                list(lapply(web_elements, function(x){x$getElementText()}) %>%  
+                        unlist %>% # Extrai texto dos elementos encontrados
+                        str_remove_all("CLP ") %>% # Retirar "CLP "
+                        str_remove_all("\\.") %>% # Retirar pontos
+                        as.numeric() # Transformar em numérico
+                )
+                
+    )
+    web_elements <- remDr$findElements(using = 'css', 
+                                       value = paste0(price_node, " .bwousA")) # Procura elemento de tarifa
+    tarifa1 <-  lapply(web_elements, function(x){x$getElementText()}) %>%  
+      unlist # Extrai texto dos elementos encontrados
+    web_elements <- remDr$findElements(using = 'css', 
+                                       value = paste0(price_node, " .ijdLad")) # elemento de tarifa especial
+    tarifa2 <-  lapply(web_elements, function(x){x$getElementText()}) %>%  
+      unlist # Extrai texto dos elementos encontrados
+    if(!is.null(tarifa2)){
+      tarifa2 <- gsub("\n", "", tarifa2) # Se tarifa especial existe, remove o caracter '\n'
+    }
+    tarifa  <- c(tarifa, 
+                 list(c(tarifa1, tarifa2)) # Concatena tarifas especiais em uma lista.
+                )
+  
+    # Fecha opções de um vôo específico
+    web_element <- remDr$findElement(using = 'css', 
+                                     value = ".MuiButton-label") # Procura elemento para fechar o vôo selecionado
+    web_element$clickElement() # Clica no elemento
+  }
+  
+  # Retorna dataframe criado com os dados extraídos.
+  # - Aeroporto de ida
+  # - Aeroporto de chegada
+  # - Hora de partida
+  # - Hora de chegada
+  # - Duração
+  # - Número de paradas
+  # - Preços
+  # - Tipo de tarifa
+  # - Data da coleta
+  # - Hora da coleta
+
+  dframe = data.frame()
+  for(i in 1:length(aer_ida)){
+    dframe = rbind(dframe, 
+                   data.frame("aero_ida" = aer_ida[i], "aero_llegada" = aer_chegada[i], 
+                              "hora_ida" = hora_ida[i], "hora_llegada" = hora_chegada[i], 
+                              "duracao" = duracao_formatado[i], "paradas" = n_paradas[i], 
+                              "tarifa" = unlist(tarifa[i]), "precios" = unlist(precos[i]), 
+                              "dia" = today(), 
+                              "hora" = format(now(), "%H:%M:%S")))
+  }
+  return(dframe)
+}
+```
+
+Utilizar a função *dados_voo* para a extração dos dados dos vôos de ida.
+
+```{r precos_ida}
+ida = dados_voo() # Coleta dados de ida
+```
+
+Para exibir as informações dos vôos de volta devemos escolher algum vôo de ida. Primeiro selecionamos o primeiro vôo.
+  
+```{r seleciona_voo}
+web_element <- remDr$findElement(using = 'css', value = ".displayAmount") # Procura elemento do primeiro voo
+web_element$clickElement() # Clica no elemento
+Sys.sleep(1) # Aguarda 1 segundo
+```
+
+Depois clicamos na primeira opção do vôo selecionado anteriormente.
+
+```{r clica_voo}
+web_element <- remDr$findElement(using = 'id', 
+                                 value = "WrapperBundleCardbundle-detail-00") # Procura elemento da primeira opção disponível
+web_element$clickElement() # Clica no elemento
+Sys.sleep(10) # Aguardar 10 segundos para a página carregar
+```
+
+Espera página carregar
+
+```{r aguarda_precos2, echo = FALSE, eval = FALSE, include = FALSE}
+# load = NULL
+# while(is.null(load)){
+#   load <- try(remDr$findElements(using = 'css', value = ".displayAmount"),
+#                                  silent = TRUE) # Enquanto não aparecer elementos preços tentar novamente após 1s
+#   if(is.null(load)){
+#     Sys.sleep(1)
+#     print('waiting...')
+#   }
+# }
+```
+
+Utilizar a função *dados_voo* para a extração dos dados dos vôos de volta.
+
+```{r precos_volta}
+volta = dados_voo() # Coleta dados de ida
+```
+
+### 2.9 - Fecha o navegador 
+
+```{r}
+remDr$close() # Fecha browser
+```
+
+### 2.10 - Ver dados extraídos dos vôos
+
+Ida
+
+```{r ida_organizada}
+DT::datatable(ida)
+```
+
+Volta
+
+```{r volta_organizada}
+DT::datatable(volta)
+```
+
+Visualização gráfica da distribuição de preços por tarifa e número de paradas para ambos os trechos
+
+```{r plot}
+rbind(ida, volta) %>% 
+  ggplot(aes(x = tarifa, y = precios, col = as.factor(paradas)))+
+    geom_boxplot() + 
+    theme(axis.text.x = element_text(angle = 90), plot.title = element_text(hjust = 0.5)) + 
+    labs(x = 'Tarifa', y = 'Precios', title = 'Distribuição de preços por tarifa e paradas') + 
+    guides(col = guide_legend(title = "Paradas"))
+```
